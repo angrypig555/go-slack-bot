@@ -52,9 +52,15 @@ func getReadme(name_full string) (err error, response string){
 			return err, ""
 		}
 		readmeString := string(readmeBytes)
+		log.Println("downloaded readme")
 		return nil, readmeString
+	} else if resp.StatusCode == http.StatusNotFound {
+		log.Println("repository not found")
+		return errors.New("repository not found"), ""
 	} else {
-		return errors.New("request returned non 200 code"), ""
+		error_msg := fmt.Sprintf("unknown error, code: %d", resp.Request.Response.StatusCode)
+		log.Println(error_msg)
+		return errors.New(error_msg), ""
 	}
 }
 
@@ -107,6 +113,7 @@ func main() {
 				log.Println("received command: ", cmd.Command)
 				var response string
 				var rtype string
+				var rblocks []slack.Block
 				command := strings.ToLower(strings.TrimSpace(cmd.Text))
 				command_parts := strings.Fields(command)
 				switch command_parts[0] {
@@ -126,15 +133,45 @@ func main() {
 						response = fmt.Sprintf("failed to get readme: %s, contact @brny if this is not user error", err)
 						rtype = "ephemeral"
 					} else {
-						response = fmt.Sprintf("README FOUND!\n%s", readme)
+						footer := fmt.Sprintf("_Gobot - called by <@%s>_", cmd.UserID)
+						blocks := []slack.Block{
+							slack.NewHeaderBlock(
+								slack.NewTextBlockObject(slack.PlainTextType, ":white_check_mark: Readme found", true, false),
+							),
+							slack.NewDividerBlock(),
+							slack.NewSectionBlock(
+								slack.NewTextBlockObject(
+									slack.MarkdownType,
+									"```" + readme + "```",
+									false, false,
+								),
+								nil, nil,
+							),
+							slack.NewDividerBlock(),
+							slack.NewSectionBlock(
+								slack.NewTextBlockObject(
+									slack.MarkdownType,
+									footer,
+									false, false,
+								),
+								nil, nil,
+							),
+
+						}
+						response = readme
 						rtype = "in_channel"
+						rblocks = blocks
 					}
 					
 				}
-				if err := client.Ack(*evt.Request, map[string]any{
+				payload := map[string]any{
 					"response_type": rtype,
 					"text": response,
-				}); err != nil {
+				}
+				if len(rblocks) > 0 {
+					payload["blocks"] = rblocks
+				}
+				if err := client.Ack(*evt.Request, payload); err != nil {
 					log.Println("failed to respond to command: ", err)
 				}
 			}
